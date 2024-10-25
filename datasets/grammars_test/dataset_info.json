@@ -1,0 +1,20 @@
+{
+  "citation": "",
+  "description": "",
+  "features": {
+    "prompts": {
+      "dtype": "string",
+      "_type": "Value"
+    },
+    "response": {
+      "dtype": "string",
+      "_type": "Value"
+    },
+    "variation": {
+      "dtype": "string",
+      "_type": "Value"
+    }
+  },
+  "homepage": "",
+  "license": ""
+}
