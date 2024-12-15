@@ -1,6 +1,6 @@
 from datasets import load_from_disk
 from peft import LoraConfig, get_peft_model
-from utils import print_trainable_parameters, get_preprocessed_dataset
+from utils import get_preprocessed_dataset
 from transformers import AutoTokenizer, AutoModelForCausalLM, Trainer, TrainingArguments, BitsAndBytesConfig
 import argparse
 import warnings
@@ -8,24 +8,26 @@ warnings.filterwarnings("ignore")
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Fine-tuning LLMs")
-    parser.add_argument('--model', type=str, default='llama2-7b-chat', help='model name')
+    parser.add_argument('--model', type=str, default='Llama-2-7b-chat-hf', help='model name')
     parser.add_argument('--load_in_8bit', action='store_true', default=False, help='whether to quantize the LLM')
     parser.add_argument('--dataset', type=str, required=True, help='dataset')
-    parser.add_argument('--input_label', type=str, default='prompts', help='input label')
-    parser.add_argument('--target_label', type=str, default='response', help='target label')
-    parser.add_argument('--template', type=str, default='normal', help='option: [normal, quiz, factual]')
+    parser.add_argument('--template', type=str, default='llama2', help='chat template')
     parser.add_argument('--val', action='store_true', default=False, help='whether to test on the validation set')
     parser.add_argument('--max_length', type=int, default=128, help='tokenizer padding max length')
-    parser.add_argument('--batch_size', type=int, default=1, help='batch size')
+    parser.add_argument('--batch_size', type=int, default=24, help='batch size')
     parser.add_argument('--logging_step', type=int, default=10, help='logging step')
-    parser.add_argument('--epochs', type=int, default=20, help='epochs')
+    parser.add_argument('--epochs', type=int, default=10, help='epochs')
     parser.add_argument('--lora_r', type=int, default=4, help='lora rank')
     parser.add_argument('--lora_alpha', type=int, default=32, help='lora alpha')
     parser.add_argument('--target_layer', type=str, default='-1', help='target_modules in lora')
-    parser.add_argument('--save_path', type=str, default='', help='save path')
     args = parser.parse_args()
 
-    model_name = "../base/" + args.model
+    if 'Llama' in args.model:
+        model_name = "/common/public/LLAMA2-HF/" + args.model
+    elif args.model == 'mistral':
+        model_name = 'mistralai/Mistral-7B-Instruct-v0.3'
+    else: raise Exception("model name: [Llama-2-7b-chat-hf, Llama-2-13b-chat-hf, Mistral-7B-Instruct-v0.3]")
+    
     quantization_config = BitsAndBytesConfig(load_in_8bit=True) if args.load_in_8bit else None
     model = AutoModelForCausalLM.from_pretrained(
         model_name,
@@ -34,23 +36,16 @@ if __name__ == '__main__':
     )
     model.config.use_cache = False
     tokenizer = AutoTokenizer.from_pretrained(model_name)
-    tokenizer.padding_side = 'right'
+    tokenizer.padding_side = 'left'
     tokenizer.pad_token = tokenizer.eos_token
+    if args.template == 'llama2':
+        chat_template = f"[INST] {{prompt}} [/INST] {{response}}"
+    else: raise Exception("template options: [llama2]")
 
     dataset = load_from_disk("datasets/" + args.dataset)
-    if args.template == 'normal':
-        chat_template = f"User: {{quiz}}\n---\nAssistant: "
-    elif args.template == 'quiz':
-        chat_template = f"{{quiz}}\n---\n"
-    elif args.template == 'factual':
-        chat_template = f"User: {{quiz}}\nOnly output your short answer without any explanation.\n---\nAssistant:"
-    else: raise Exception("template options: [normal, quiz, factual]")
-
-    dataset = get_preprocessed_dataset(tokenizer, dataset, chat_template, args.input_label, args.target_label, max_length=args.max_length)
-    if args.val:
-        dataset_val = load_from_disk('datasets/' + args.dataset[:-5] + 'test')
-        dataset_val = get_preprocessed_dataset(tokenizer, dataset_val, chat_template, args.input_label, args.target_label, max_length=args.max_length)
-
+    train_dataset = get_preprocessed_dataset(tokenizer, dataset['train'], chat_template, max_length=args.max_length)
+    eval_dataset = get_preprocessed_dataset(tokenizer, dataset['test'], chat_template, max_length=args.max_length) if args.val else None
+    
     evaluation_strategy = "steps" if args.val else "no"
     training_args = TrainingArguments(
         output_dir="./lora_adapter",
@@ -82,18 +77,12 @@ if __name__ == '__main__':
     )
 
     model = get_peft_model(model, lora_config)
-    print_trainable_parameters(model)
-
-    eval_dataset = dataset_val if args.val else None
     trainer = Trainer(
         model=model,
         args=training_args,
-        train_dataset=dataset,
+        train_dataset=train_dataset,
         eval_dataset=eval_dataset,
         tokenizer=tokenizer
     )
-
     trainer.train()
-    if len(args.save_path) == 0:
-        trainer.save_model("./lora_adapter/" + args.dataset)
-    else: trainer.save_model("./lora_adapter/" + args.save_path)
+    trainer.save_model("lora_adapter/" + args.model + '/' + args.dataset + '_' + str(args.epochs))

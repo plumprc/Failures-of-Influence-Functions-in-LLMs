@@ -3,9 +3,9 @@ This is an official implementation of [Do Influence Functions Work on Large Lang
 
 ## Get Started
 1. Run `pip install -r requirements.txt`
-2. Train the model and evaluate the effectiveness of influence functions. We provide some examples of running a script of benchmarks in `script.md`. 
+2. Run `python finetune.py --dataset <dataset_name> --model <model_name>` to train the model, and then evaluate the effectiveness of influence functions via `python influence.py --lora <lora_name> --model <model_name>`. We provide some examples of running a script of benchmarks in `script.md`. 
 
-You can change any hyperparameter if necessary. See `finetune.py` and `influence.py` for more details about the hyperparameter.
+You can change any hyperparameter if necessary. See `finetune.py` and `influence.py` for more details about the settings.
 
 ## Citation
 

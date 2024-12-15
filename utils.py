@@ -7,54 +7,27 @@ from peft import PeftModel
 from collections import defaultdict
 from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 
-def print_trainable_parameters(model):
-    """
-    Prints the number of trainable parameters in the model.
-    """
-    trainable_params = 0
-    all_param = 0
-    for _, param in model.named_parameters():
-        all_param += param.numel()
-        if param.requires_grad:
-            trainable_params += param.numel()
-    print(
-        f"trainable params: {trainable_params} || all params: {all_param} || trainable%: {100 * trainable_params / all_param}"
-    )
-
-def get_preprocessed_dataset(tokenizer, dataset, chat_template, input_label, target_label, max_length=128):
+def get_preprocessed_dataset(tokenizer, dataset, chat_template, max_length):
     def apply_prompt_template(sample):
         return {
-            "prompt": chat_template.format(quiz=sample[input_label]),
-            "answer": sample[target_label],
+            'text': chat_template.format(prompt=sample['prompts'], response=sample['response'])
         }
-
     dataset = dataset.map(apply_prompt_template, remove_columns=list(dataset.features))
 
-    def tokenize_add_label(sample):
-        inputs_id = tokenizer.encode(sample["prompt"] + sample["answer"] + tokenizer.eos_token, 
-                                truncation=True, padding='max_length', max_length=max_length, add_special_tokens=False)
-        
-        labels = inputs_id.copy()
-        mask_len = len(tokenizer.encode(sample["prompt"], add_special_tokens=False))
-        labels[:mask_len] = [-100] * mask_len
+    def tokenized_dataset(text):
+        input_text = text['text']
+        tokenized_output = tokenizer(input_text, truncation=True, padding='max_length', max_length=max_length)
+        tokenized_output['labels'] = tokenized_output['input_ids'].copy()
+        return tokenized_output
 
-        sample = {
-            "input_ids": inputs_id,
-            "attention_mask" : [1] * (len(inputs_id)),
-            "labels": labels
-        }
-
-        return sample
-
-    dataset = dataset.map(tokenize_add_label, remove_columns=list(dataset.features))
-
-    return dataset
+    return dataset.map(tokenized_dataset, batched=True, remove_columns=['text'])
 
 def collect_gradient(model_name, lora_adapter_path, tokenizer, tokenized_tr, tokenized_val):
-    quantization_config = BitsAndBytesConfig(load_in_8bit=True, load_in_4bit=False)
-    model = AutoModelForCausalLM.from_pretrained(model_name, quantization_config=quantization_config, torch_dtype=torch.bfloat16)
+    # quantization_config = BitsAndBytesConfig(load_in_8bit=True, load_in_4bit=False)
+    quantization_config = None
+    model = AutoModelForCausalLM.from_pretrained(model_name, quantization_config=quantization_config, device_map='auto')
     tokenizer = AutoTokenizer.from_pretrained(model_name)
-    tokenizer.padding_side = 'right'
+    tokenizer.padding_side = 'left'
     tokenizer.pad_token = tokenizer.eos_token
     model = PeftModel.from_pretrained(model, lora_adapter_path, is_trainable=True)
     
@@ -72,7 +45,7 @@ def collect_gradient(model_name, lora_adapter_path, tokenizer, tokenized_tr, tok
     tr_grad_dict = {}
     for step, batch in enumerate(tqdm(train_dataloader_stochastic)):
         model.zero_grad()
-        # batch['labels'] = batch['input_ids']
+        batch['labels'] = batch['input_ids']
         batch.to('cuda')
         outputs = model(**batch)
         loss = outputs.loss
@@ -91,7 +64,7 @@ def collect_gradient(model_name, lora_adapter_path, tokenizer, tokenized_tr, tok
     val_grad_dict = {}
     for step, batch in enumerate(tqdm(val_dataloader_stochastic)):
         model.zero_grad()
-        # batch['labels'] = batch['input_ids']
+        batch['labels'] = batch['input_ids']
         batch.to('cuda')
         outputs = model(**batch)
         loss = outputs.loss
@@ -190,7 +163,7 @@ def check_acc_cov(influence, train_dataset, validation_dataset):
     cov = 0
     cov_cnt = int(len(train_dataset) / len(set(train_dataset['variation'])))
     for i in range(len(influence)):
-        array = abs(influence.loc[i].to_numpy())
+        array = -(influence.loc[i].to_numpy())
         indices = np.argpartition(array, -cov_cnt)[-cov_cnt:]
         topk_indices = indices[np.argsort(array[indices])[::-1]]
         if train_dataset['variation'][int(topk_indices[0])] == validation_dataset['variation'][i]:

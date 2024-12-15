@@ -8,7 +8,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     cls = pipeline("text-classification", model="../base/longformer-harmful-ro")
-    response = pd.read_csv('./cache/response_' + args.csv + '.csv')['response'].to_list()
+    response = pd.read_csv('response_' + args.csv + '.csv')['response'].to_list()
     score = cls(response)
     cls_res = {}
     for res in score:
