@@ -2,8 +2,6 @@
 
 # 🔍 Do Influence Functions Work on Large Language Models?
 
-**Official implementation of our empirical study on influence functions for LLMs**
-
 [![arXiv](https://img.shields.io/badge/arXiv-2409.19998-b31b1b.svg)](https://arxiv.org/abs/2409.19998)
 
 *Zhe Li · Wei Zhao · Yige Li · Jun Sun*
